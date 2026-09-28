@@ -1,13 +1,13 @@
 function [ok, raw] = dca_capture(uart, dca, cfg, outputBin)
-% DCA_CAPTURE  ARM -> sensorStart -> prijem do PAMATE (raw int16) -> stop.  [v2: memory-first]
+% DCA_CAPTURE  ARM -> sensorStart -> receive into MEMORY (raw int16) -> stop.
 %
-% Poradie: record -> raw (-> cube v triede awr2944_dca) -> .bin (volitelne).
-% Vrati:  ok  - true ak prislo nejake data
-%         raw - int16 stlpcovy vektor ADC vzoriek (straty vyplnene 0)
-% .bin sa zapise LEN ak je zadany neprazdny outputBin (spatne kompatibilne s CLI_capture).
+% Order: record -> raw (-> cube in the awr2944_dca class) -> .bin (optional).
+% Returns: ok  - true if any data arrived
+%          raw - int16 column vector of ADC samples (losses filled with 0)
+% A .bin is written ONLY if a non-empty outputBin is given.
 %
-% Opravy rámca/portov/hlavičky ostavaju (viz HANDOFF v19):
-%   prikaz 5A A5..AA EE, odpoved na 4096, dat. paket 10 B hlavicka + 1456 B payload.
+% Command frame 5A A5 .. AA EE, response on port 4096,
+% data packet = 10 B header + 1456 B payload.
 
     ok = false; raw = int16([]);
     if nargin < 4, outputBin = ''; end
@@ -16,23 +16,23 @@ function [ok, raw] = dca_capture(uart, dca, cfg, outputBin)
 
     if cfg.numFrames > 0
         expBytes = cfg.numADCSamples * cfg.chirpsPerFrame * cfg.numRx * (cfg.adcBits/8) * cfg.numFrames;
-        awr_log(sprintf('Ocakavana velkost: %.2f MB (%d B)', expBytes/1e6, expBytes));
+        awr_log(sprintf('Expected size: %.2f MB (%d B)', expBytes/1e6, expBytes));
     else
-        expBytes = 64e6; awr_log('Infinite frames - strop prealokacie 64 MB');
+        expBytes = 64e6; awr_log('Infinite frames - preallocation limit 64 MB');
     end
 
-    % prealokovany vystupny bajtovy buffer (do pamate)
+    % preallocated output byte buffer (in memory)
     cap = ceil(expBytes*1.05 / PAY_B) * PAY_B;
     out = zeros(1, cap, 'uint8'); widx = 0;
 
     % ARM
     awr_log('DCA1000 ARM (START_RECORD 0x05)...');
     armResp = dca_send(dca.udpCfg, dca.dcaIP, dca.configPort, 5, []);
-    awr_log(['  ARM odpoved: ' armResp]); pause(2.0);
+    awr_log(['  ARM response: ' armResp]); pause(2.0);
 
-    % Trigger (mmWave CLI: prvy start po konfiguracii = 'sensorStart',
-    % restart po sensorStop = 'sensorStart 0' - urcuje volajuci cez cfg.sensorStartCmd;
-    % bez tohto pola sa sprava ako doteraz -> spatne kompatibilne)
+    % Trigger (mmWave CLI: first start after configuration = 'sensorStart',
+    % restart after sensorStop = 'sensorStart 0' - chosen by the caller via
+    % cfg.sensorStartCmd; without this field a bare 'sensorStart' is sent)
     flush(dca.udpData);
     startCmd = 'sensorStart';
     if isfield(cfg, 'sensorStartCmd') && ~isempty(cfg.sensorStartCmd)
@@ -41,7 +41,7 @@ function [ok, raw] = dca_capture(uart, dca, cfg, outputBin)
     awr_log(['Trigger: ' startCmd '...']);
     awr_send_cmd(uart, startCmd);
 
-    % prijem
+    % receive
     buf = uint8([]); pkts=0; lost=0; lastSeq=-1; t0=tic; lastRep=tic; firstData=-1;
     fprintf('\n');
     while true
@@ -54,7 +54,7 @@ function [ok, raw] = dca_capture(uart, dca, cfg, outputBin)
                 if lastSeq >= 0 && seq > lastSeq + 1
                     miss = seq - lastSeq - 1; lost = lost + miss;
                     z = miss*PAY_B;
-                    if widx+z <= cap, widx = widx + z; end   % out je uz 0 -> zero-fill
+                    if widx+z <= cap, widx = widx + z; end   % out is already 0 -> zero fill
                 end
                 lastSeq = seq;
                 if widx+PAY_B <= cap
@@ -79,22 +79,22 @@ function [ok, raw] = dca_capture(uart, dca, cfg, outputBin)
     awr_send_cmd(uart, 'sensorStop'); pause(0.3);
     dca_send(dca.udpCfg, dca.dcaIP, dca.configPort, 6, []);
 
-    % vysledok -> raw int16
+    % result -> raw int16
     out = out(1:widx);
     raw = typecast(out, 'int16'); raw = raw(:);
-    if firstData < 0, awr_log('  POZOR: na port 4098 nedoslo NIC (LVDS->DCA?).');
-    else, awr_log(sprintf('  Prve data po %.2f s od sensorStart', firstData)); end
-    awr_log(sprintf('Prijate: %.3f MB (%d B), pkt=%d, stratene=%d', widx/1e6, widx, pkts, lost));
+    if firstData < 0, awr_log('  WARNING: NOTHING arrived on port 4098 (LVDS->DCA?).');
+    else, awr_log(sprintf('  First data %.2f s after sensorStart', firstData)); end
+    awr_log(sprintf('Received: %.3f MB (%d B), pkt=%d, lost=%d', widx/1e6, widx, pkts, lost));
     ok = (widx > 0);
 
-    % volitelny .bin (spatna kompatibilita / mmWS export)
+    % optional .bin
     if ~isempty(outputBin)
         fid = fopen(outputBin, 'wb');
         if fid > 0, fwrite(fid, out, 'uint8'); fclose(fid); awr_log(['  .bin: ' outputBin]); end
     end
 end
 
-%% ====== lokalne pomocne ======
+%% ====== local helpers ======
 function resp = dca_send(sock, ip, port, code, payload)
     if nargin < 5, payload = []; end
     payload = uint8(payload(:)'); n = numel(payload);
@@ -106,5 +106,5 @@ function resp = dca_send(sock, ip, port, code, payload)
         if sock.NumBytesAvailable > 0, r = read(sock, sock.NumBytesAvailable, 'uint8'); break; end
         pause(0.02);
     end
-    if isempty(r), resp = '(ziadna odpoved)'; else, resp = sprintf('%02X ', r); end
+    if isempty(r), resp = '(no response)'; else, resp = sprintf('%02X ', r); end
 end

@@ -1,18 +1,19 @@
 function lines = awr_read_lines(uart, maxLines, timeout_s)
-% AWR_READ_LINES  Číta odpoveď z UART cez SUROVÉ bajty (bez blokujúceho readline).
+% AWR_READ_LINES  Reads a UART response as RAW bytes (no blocking readline).
 %
-% Prečo nie readline: demo CLI po odpovedi vypíše prompt 'mmwDemo:/>' BEZ
-% koncového \n. readline by čakal na \n až do Timeout portu (~5 s) na KAŽDOM
-% príkaze. Tu čítame surové bajty (read vráti hneď to, čo je k dispozícii) a
-% skončíme hneď po detekcii 'Done'/'Error'/promptu -> ~50 ms na príkaz.
+% Why not readline: after a response the demo CLI prints the prompt 'mmwDemo:/>'
+% WITHOUT a trailing \n. readline would wait for \n until the port Timeout (~5 s)
+% on EVERY command. Here raw bytes are read (read returns immediately what is
+% available) and reading ends as soon as 'Done'/'Error'/the prompt is detected
+% -> ~50 ms per command.
 %
-% Vstupy:
-%   uart       - serialport objekt
-%   maxLines   - max počet vrátených riadkov (nepovinné, default inf)
-%   timeout_s  - celkový strop čakania (default 0.5 s)
+% Inputs:
+%   uart       - serialport object
+%   maxLines   - maximum number of returned lines (optional, default inf)
+%   timeout_s  - overall wait limit (default 0.5 s)
 %
-% Výstup:
-%   lines  - cell array prečítaných riadkov (strip; prompt vynechaný)
+% Output:
+%   lines  - cell array of the lines read (trimmed; prompt omitted)
 
     if nargin < 2 || isempty(maxLines),  maxLines  = inf; end
     if nargin < 3 || isempty(timeout_s), timeout_s = 0.5; end
@@ -25,7 +26,7 @@ function lines = awr_read_lines(uart, maxLines, timeout_s)
     while toc(tStart) < timeout_s
         n = uart.NumBytesAvailable;
         if n > 0
-            chunk = read(uart, n, 'char');      % surové bajty, vráti okamžite
+            chunk = read(uart, n, 'char');      % raw bytes, returns immediately
             buf = [buf, char(chunk)];           %#ok<AGROW>
             if contains(buf, 'mmwDemo') || contains(buf, 'Done') || ...
                contains(buf, 'Error', 'IgnoreCase', true) || ...
@@ -33,13 +34,13 @@ function lines = awr_read_lines(uart, maxLines, timeout_s)
                 sawDone = true;
             end
         elseif sawDone
-            break;                              % odpoveď prišla a buffer je prázdny -> hotovo
+            break;                              % response received and buffer empty -> done
         else
             pause(0.005);
         end
     end
 
-    % rozdeľ buffer na riadky (CRLF/CR/LF) a vynechaj prázdne + holý prompt
+    % split the buffer into lines (CRLF/CR/LF), skip empty lines and the bare prompt
     parts = regexp(buf, '\r\n|\n|\r', 'split');
     for k = 1:numel(parts)
         s = strtrim(parts{k});

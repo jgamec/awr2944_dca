@@ -1,20 +1,20 @@
 function resp = awr_send_cmd(uart, cmd)
-% AWR_SEND_CMD  Pošle CLI príkaz na AWR2944 cez UART
+% AWR_SEND_CMD  Sends a CLI command to the AWR2944 over UART
 %
-% Príkaz sa posiela ako ASCII string + LF (line feed).
-% AWR2944 CLI prijíma príkazy ukončené \n.
+% The command is sent as an ASCII string + LF (line feed).
+% The AWR2944 CLI accepts commands terminated by \n.
 %
-% Vstupy:
-%   uart  - serialport objekt
-%   cmd   - string príkaz (napr. 'sensorStart', 'profileCfg 0 77 ...')
+% Inputs:
+%   uart  - serialport object
+%   cmd   - command string (e.g. 'sensorStart', 'profileCfg 0 77 ...')
 %
-% Výstup:
-%   resp  - prázdny (odpoveď sa číta cez awr_read_lines)
+% Output:
+%   resp  - empty (the response is read with awr_read_lines)
 
 resp = [];
 
 if isempty(uart) || ~isvalid(uart)
-    awr_log('ERR: UART nie je platný');
+    awr_log('ERR: UART is not valid');
     return;
 end
 
@@ -22,5 +22,5 @@ try
     writeline(uart, cmd);
     pause(0.02);
 catch e
-    awr_log(['ERR: Nepodarilo sa poslať príkaz "' cmd '": ' e.message]);
+    awr_log(['ERR: Could not send command "' cmd '": ' e.message]);
 end

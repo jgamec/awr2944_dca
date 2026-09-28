@@ -1,11 +1,11 @@
 function awr_log(msg)
-% AWR_LOG  Vypíše správu s časovou značkou (ako mmWave Studio output log)
+% AWR_LOG  Prints a message with a timestamp (like the mmWave Studio output log)
 %
-% Formát: [HH:MM:SS] správa
+% Format: [HH:MM:SS] message
 %
-% Príklad:
-%   awr_log('OK: Firmware nahraný')
-%   -> [10:18:32] OK: Firmware nahraný
+% Example:
+%   awr_log('OK: sensor configured')
+%   -> [10:18:32] OK: sensor configured
 
 t = datetime('now', 'Format', 'HH:mm:ss');
 fprintf('[%s] %s\n', char(t), msg);

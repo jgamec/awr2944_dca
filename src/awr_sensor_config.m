@@ -1,17 +1,17 @@
 function [ok, cfg] = awr_sensor_config(uart, cfgFile)
-% AWR_SENSOR_CONFIG  Načíta .cfg súbor a pošle Profile/Chirp/Frame príkazy
+% AWR_SENSOR_CONFIG  Reads a .cfg file and sends the Profile/Chirp/Frame commands
 %
-% Zodpovedá krokom 13-15 v mmWave Studio SensorConfig tab.
-% .cfg formát: štandardný TI mmWave CLI (rovnaký ako mmWS exportuje)
+% Corresponds to the SensorConfig tab of mmWave Studio.
+% .cfg format: standard TI mmWave CLI
 
 ok = false;
 cfg = struct();
 
-%% Načítaj .cfg súbor
-awr_log(['Načítavam .cfg: ' cfgFile]);
+%% Read the .cfg file
+awr_log(['Reading .cfg: ' cfgFile]);
 fid = fopen(cfgFile, 'r');
 if fid < 0
-    awr_log(['ERR: Nemôžem otvoriť: ' cfgFile]);
+    awr_log(['ERR: Cannot open: ' cfgFile]);
     return;
 end
 lines = {};
@@ -20,12 +20,12 @@ while ~feof(fid)
     if ischar(L), lines{end+1, 1} = strtrim(L); end
 end
 fclose(fid);
-awr_log(sprintf('Načítaných %d riadkov z .cfg', numel(lines)));
+awr_log(sprintf('Read %d lines from .cfg', numel(lines)));
 
-%% Filtruj a pošli príkazy
+%% Filter and send the commands
 SKIP_CMDS = {'sensorStart', 'sensorStop', 'flushCfg'};
 
-awr_log('Posielam konfiguračné príkazy na AWR2944...');
+awr_log('Sending configuration commands to the AWR2944...');
 sentCount = 0;
 errorCount = 0;
 firstErrCmd = '';
@@ -49,7 +49,7 @@ for i = 1:numel(lines)
         if isempty(RL), continue; end
         if contains(RL, 'Error', 'IgnoreCase', true) || ...
            contains(RL, 'Fail', 'IgnoreCase', true)
-            awr_log(['  ERR odpoved: ' RL]);
+            awr_log(['  ERR response: ' RL]);
             lineHadError = true;
         end
     end
@@ -60,38 +60,38 @@ for i = 1:numel(lines)
     sentCount = sentCount + 1;
 end
 
-awr_log(sprintf('Odoslane: %d prikazov, Chyby: %d', sentCount, errorCount));
+awr_log(sprintf('Sent: %d commands, errors: %d', sentCount, errorCount));
 
-%% Parsuj .cfg pre výpočet veľkosti .bin
-awr_log('Parsovanie .cfg parametrov...');
+%% Parse the .cfg to compute the expected .bin size
+awr_log('Parsing .cfg parameters...');
 cfg = parse_cfg(lines);
 print_cfg_summary(cfg);
 
-% Uloz profil ako naposledy pouzity (aby sa nastroje ako micro_doppler dali volat
-% rovno na kocku bez opatovneho zadavania .cfg). radar_cfg si ho ulozi sam.
+% Optional hook: remember the profile as the last one used, if the full AWR2944
+% toolbox (radar_cfg) is on the path; silently skipped otherwise.
 try, radar_cfg(cfgFile); catch, end
 
-% Vysledok: konfiguracia je uspesna LEN ak radar neodmietol ziadny prikaz.
-% (Predtym sa vzdy vracalo ok=true, takze odmietnuty chirpCfg/channelCfg presiel
-%  ticho a zlyhanie sa prejavilo az 30 s timeoutom DCA bez dat - cervena LED.)
+% Result: the configuration succeeds ONLY if the radar rejected no command.
+% (Otherwise a rejected chirpCfg/channelCfg would pass silently and the failure
+%  would show only as a 30 s DCA timeout without data.)
 if errorCount > 0
     ok = false;
-    awr_log(sprintf(['CHYBA: radar odmietol %d konfiguracny(ch) prikaz(ov). ' ...
-        'Prvy chybny: "%s". Skontroluj .cfg (napr. zhodu channelCfg <-> chirpCfg masiek). ' ...
-        'SensorConfig NEdokonceny.'], errorCount, firstErrCmd));
+    awr_log(sprintf(['ERROR: the radar rejected %d configuration command(s). ' ...
+        'First rejected: "%s". Check the .cfg (e.g. consistency of channelCfg and chirpCfg masks). ' ...
+        'SensorConfig NOT completed.'], errorCount, firstErrCmd));
 else
     ok = true;
-    awr_log('OK: SensorConfig dokonceny');
+    awr_log('OK: SensorConfig completed');
 end
 pause(0.3);
 flush(uart);
 end
 
-%% ── Parsovanie .cfg parametrov ────────────────────────────────────────
+%% -- Parsing of .cfg parameters ---------------------------------------
 function cfg = parse_cfg(lines)
 cfg = struct();
 
-% Defaultné hodnoty
+% Default values
 cfg.numADCSamples   = 256;
 cfg.adcSampleRate   = 10000;
 cfg.freqSlopeConst  = 29.982;
@@ -132,13 +132,13 @@ for i = 1:numel(lines)
             %               6           7           8            9
             %               10          11          12           13
             %
-            % Priklad: profileCfg 0 77 186 2.5 57.14 0 0 70 1 272 5070 0 0 30
+            % Example: profileCfg 0 77 186 2.5 57.14 0 0 70 1 272 5070 0 0 30
             %          vals:       1  2   3   4    5  6  7  8  9  10   11 12 13 14
             % vals(2)=startFreq=77 GHz
             % vals(3)=idleTime=186 us
             % vals(4)=adcStartTime=2.5 us
             % vals(5)=rampEndTime=57.14 us
-            % vals(8)=freqSlopeConst [MHz/us]   (POZOR: vals(9) je txStartTime, nie sklon)
+            % vals(8)=freqSlopeConst [MHz/us]   (NOTE: vals(9) is txStartTime, not the slope)
             % vals(10)=numAdcSamples
             % vals(11)=adcSampleRate [ksps]
             if numel(vals) >= 11
@@ -154,21 +154,21 @@ for i = 1:numel(lines)
         case 'chirpcfg'
             % chirpCfg startIdx endIdx profileId freqVar slopeVar idleVar adcVar txEnable
             if numel(vals) >= 8
-                % Zbiera vsetky TX masky zo vsetkych chirpCfg riadkov
+                % Collects the TX masks of all chirpCfg lines
                 txMask = vals(8);
                 txCount = sum(bitget(uint32(txMask), 1:4));
                 cfg.numTx = max(cfg.numTx, txCount);
-                % startChirpTx/endChirpTx sa nastavuje z frameCfg
+                % startChirpTx/endChirpTx are set from frameCfg
             end
 
         case 'framecfg'
             % frameCfg startChirpIdx endChirpIdx numLoops numFrames periodicity trigSelect trigDelay
-            % Priklad: frameCfg 0 3 16 0 272 200 1 0
+            % Example: frameCfg 0 3 16 0 272 200 1 0
             % vals:              1  2   3   4   5   6   7  8
             % vals(1)=startChirp=0, vals(2)=endChirp=3
             % vals(3)=numLoops=16, vals(4)=numFrames=0(infinite)
-            % POZOR: periodicita je 6. hodnota [ms] (overene podla LogFile FrameConfig:
-            % 1e8 ns = 100 ms pre 'frameCfg 0 2 16 20 560 100 1 0'); 5. hodnota nie je perioda.
+            % NOTE: the periodicity is the 6th value [ms] (verified against the LogFile
+            % FrameConfig: 1e8 ns = 100 ms for 'frameCfg 0 2 16 20 560 100 1 0'); the 5th is not.
             if numel(vals) >= 4
                 cfg.startChirpTx     = vals(1);
                 cfg.endChirpTx       = vals(2);
@@ -192,7 +192,7 @@ for i = 1:numel(lines)
 
         case 'adccfg'
             % adcCfg numADCBits adcOutputFmt
-            % numADCBits: 1=12bit, 2=16bit, 3=14bit  (pozor: 2=16, 3=14 je TI mapovanie)
+            % numADCBits: 1=12bit, 2=16bit, 3=14bit  (note: 2=16, 3=14 is the mapping used here)
             if numel(vals) >= 2
                 bitMap = [12, 16, 14];  % index 1,2,3
                 idx = round(vals(1));
@@ -204,7 +204,7 @@ for i = 1:numel(lines)
     end
 end
 
-% Vypočítaj odvodené hodnoty
+% Compute derived values
 cfg.bytesPerSample = cfg.adcBits / 8;
 cfg.expectedBytes = cfg.numADCSamples * cfg.chirpsPerFrame * cfg.numRx * cfg.bytesPerSample;
 if cfg.numFrames > 0
@@ -216,10 +216,10 @@ else
 end
 end
 
-%% ── Výpis súhrnu konfigurácie ─────────────────────────────────────────
+%% -- Configuration summary ----------------------------------------------
 function print_cfg_summary(cfg)
 awr_log('');
-awr_log('=== Konfiguracia radaru ===');
+awr_log('=== Radar configuration ===');
 awr_log(sprintf('  Start freq:      %.3f GHz', cfg.startFreq));
 awr_log(sprintf('  Freq slope:      %.4f MHz/us', cfg.freqSlopeConst));
 awr_log(sprintf('  Idle time:       %.2f us', cfg.idleTime));
@@ -237,11 +237,11 @@ awr_log(sprintf('  Chirps/frame:    %d  (= (%d-%d+1) x %d loops)', ...
 awr_log(sprintf('  Num frames:      %d  (0=infinite)', cfg.numFrames));
 awr_log(sprintf('  Frame period:    %.1f ms', cfg.framePeriodicity));
 if cfg.numFrames > 0
-    awr_log(sprintf('  Ocakavana velkost .bin: %.2f MB', cfg.expectedMB));
+    awr_log(sprintf('  Expected .bin size: %.2f MB', cfg.expectedMB));
     awr_log(sprintf('    = %d samples x %d chirps/frame x %d RX x %d frames x %d B/sample', ...
         cfg.numADCSamples, cfg.chirpsPerFrame, cfg.numRx, cfg.numFrames, cfg.bytesPerSample));
 else
-    awr_log('  Ocakavana velkost .bin: neobmedzena (infinite frames)');
+    awr_log('  Expected .bin size: unlimited (infinite frames)');
 end
 awr_log('');
 end

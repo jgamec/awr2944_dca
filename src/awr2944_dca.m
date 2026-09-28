@@ -1,36 +1,36 @@
 classdef awr2944_dca < handle
-% AWR2944_DCA  Ekvivalent MathWorks 'dca1000' pre AWR2944 EVM + DCA1000.  [v1.7]
-%
-% Headless raw-ADC capture bez mmWave Studio.
+% AWR2944_DCA  Raw ADC data acquisition from the TI AWR2944EVM + DCA1000EVM
+% in MATLAB, without mmWave Studio.  [v1.8]
 %
 % BATCH (record -> cube -> .bin + adc_data_LogFile.txt):
 %   src  = awr2944_dca;
-%   cube = src.capture();   % spyta sa na port -> konfig -> zaznam do Downloads\awr2944_<cas>\
+%   cube = src.capture();   % asks for profile and port -> configure -> record
+%                           % into Downloads\awr2944_<timestamp>\
 %   src.release();
 %
-% LIVE (jeden ramec na volanie, ako dca1000 obj()):
+% LIVE (one frame per call):
 %   src = awr2944_dca; src.RecordToFile = false;
 %   src.startLive(); fr = src.readFrame(); ... ; src.stopLive(); src.release();
-%   (hotovy demo: live_display)
 %
-% Ukladanie: default do priecinka Downloads aktualneho pouzivatela, kazde meranie
-% do vlastneho podpriecinka 'awr2944_RRRR-MM-DD_HH-MM-SS' (.bin + adc_data_LogFile.txt).
-% Vystup je kompatibilny s BIN2MAT_2944 (lane=1, real).
+% Storage: by default into the current user's Downloads folder, each measurement
+% into its own subfolder 'awr2944_YYYY-MM-DD_HH-MM-SS' (.bin + adc_data_LogFile.txt).
+% The .bin + LogFile pair follows the mmWave Studio output convention.
 %
-% ⚠ AWR2944 = REALNE vzorky (nie IQ) -> cube/frame su REALNE (double z int16).
-% Cube: [SamplesPerChirp x NumRX x ChirpsPerFrame (x NumFrames pri batch)]
+% NOTE: the AWR2944 outputs REAL-valued samples (not IQ) -> cube/frame are real
+% (double converted from int16).
+% Cube: [SamplesPerChirp x NumRX x ChirpsPerFrame (x NumFrames in batch mode)]
 
     properties
         ConfigPort       = "COM9"
         HostIPAddress    = "192.168.33.30"
         DcaIPAddress     = "192.168.33.180"
-        ConfigFile       = ""        % prazdne -> DCA_RX1111_TX1110_TDM.cfg vedla triedy (auto v konstruktore)
-        RecordLocation   = ""        % prazdne -> auto Downloads (nastavi sa v konstruktore)
+        ConfigFile       = ""        % empty -> DCA_RX1111_TX1110_TDM.cfg next to the class (set in constructor)
+        RecordLocation   = ""        % empty -> Downloads folder (set in constructor)
         RecordFilePrefix = "adc_data_Raw"
         RecordToFile     = true
-        WriteLogFile     = true      % spolu s .bin zapisat aj adc_data_LogFile.txt (pre bin2mat)
-        RecordSubfolder  = true      % kazde meranie do vlastneho podpriecinka s casovou peciatkou
-        CaptureFrames    = 20        % pocet ramcov pre capture(), ak .cfg ma numFrames=0 (napr. DV export)
+        WriteLogFile     = true      % write adc_data_LogFile.txt together with the .bin
+        RecordSubfolder  = true      % each measurement into its own time-stamped subfolder
+        CaptureFrames    = 20        % frames for capture() if the .cfg has numFrames=0 (e.g. Demo Visualizer export)
     end
 
     properties (SetAccess = private)
@@ -50,7 +50,7 @@ classdef awr2944_dca < handle
         dca  = []
         cfg  = []
         isSetup = false
-        nCaptures = 0      % pocet capture() od posledneho setup (0 = prvy start po konfiguracii)
+        nCaptures = 0      % capture() calls since last setup (0 = first start after configuration)
         sRawLeftover  = uint8([])
         sPayloadAccum = uint8([])
         sLastSeq      = -1
@@ -62,13 +62,13 @@ classdef awr2944_dca < handle
             for k = 1:2:numel(varargin)-1
                 p = varargin{k}; v = varargin{k+1};
                 if (ischar(p) || isstring(p)) && isprop(obj, char(p))
-                    try, obj.(char(p)) = v; catch, warning('Nedalo sa nastavit %s', char(p)); end
+                    try, obj.(char(p)) = v; catch, warning('Could not set %s', char(p)); end
                 else
-                    warning('Neznama vlastnost: %s', char(p));
+                    warning('Unknown property: %s', char(p));
                 end
             end
             if strlength(string(obj.ConfigFile)) == 0
-                here = fileparts(mfilename('fullpath'));   % priecinok, kde lezi awr2944_dca.m
+                here = fileparts(mfilename('fullpath'));   % folder containing awr2944_dca.m
                 obj.ConfigFile = string(fullfile(here, 'DCA_RX1111_TX1110_TDM.cfg'));
             end
             if strlength(string(obj.RecordLocation)) == 0
@@ -78,38 +78,38 @@ classdef awr2944_dca < handle
         end
 
         function openUart(obj)
-            obj.pickPort();                 % vzdy sa opyta, ktory COM/port pouzit
+            obj.pickPort();                 % always asks which COM port to use
             obj.uart = serialport(obj.ConfigPort, 115200, 'DataBits',8, ...
                        'Parity','none', 'StopBits',1, 'FlowControl','none', 'Timeout',5);
             configureTerminator(obj.uart, 'LF');
-            pause(1.0);            % cold-start: nech sa XDS110/CDC port po otvoreni (DTR reset) ustali
+            pause(1.0);            % cold start: let the XDS110/CDC port settle after opening (DTR reset)
             flush(obj.uart);
             awr_send_cmd(obj.uart, 'sensorStop'); awr_read_lines(obj.uart, 3, 0.4);
             awr_send_cmd(obj.uart, 'flushCfg');   awr_read_lines(obj.uart, 3, 0.4);
         end
 
         function port = pickPort(obj)
-        % Opyta sa, ktory seriovy (COM) port pouzit. Vypise dostupne porty; na
-        % Windows aj s popisom a oznaci/ponukne 'Application/User UART' (XDS110
-        % config UART). Enter = ponuknuty default. Cross-platform (serialportlist).
+        % Asks which serial (COM) port to use. Lists the available ports; on
+        % Windows also with descriptions, marking/offering the 'Application/User UART'
+        % (XDS110 configuration UART). Enter = offered default. Cross-platform (serialportlist).
             try, avail = serialportlist("available"); catch, avail = serialportlist(); end
             if isempty(avail)
-                error('awr2944_dca:noport', ['Nenasiel sa ziadny seriovy port.\n' ...
-                    'Pripoj radar (XDS110) cez USB a over v Spravcovi zariadeni polozku\n' ...
-                    '"XDS110 Class Application/User UART", potom spusti setup znova.']);
+                error('awr2944_dca:noport', ['No serial port found.\n' ...
+                    'Connect the radar (XDS110) over USB, check that Device Manager lists\n' ...
+                    '"XDS110 Class Application/User UART", then run setup again.']);
             end
-            descMap = obj.portDescr();      % COMx -> popis (len Windows; inak prazdne)
+            descMap = obj.portDescr();      % COMx -> description (Windows only; empty otherwise)
             recIdx = 0;
-            fprintf('\nDostupne seriove porty:\n');
+            fprintf('\nAvailable serial ports:\n');
             for i = 1:numel(avail)
                 nm = char(avail(i)); d = '';
                 if isKey(descMap, nm), d = descMap(nm); end
                 tag = '';
                 if ~isempty(d) && (contains(d,'Application/User UART','IgnoreCase',true) || ...
                                    contains(d,'Enhanced COM Port','IgnoreCase',true))
-                    tag = '  <- odporucany (config)'; if recIdx==0, recIdx = i; end
+                    tag = '  <- recommended (config)'; if recIdx==0, recIdx = i; end
                 elseif strcmpi(nm, obj.ConfigPort)
-                    tag = '  <- predvoleny';
+                    tag = '  <- default';
                 end
                 if isempty(d)
                     fprintf('  [%d] %s%s\n', i, nm, tag);
@@ -118,7 +118,7 @@ classdef awr2944_dca < handle
                 end
             end
             if recIdx > 0, defStr = char(avail(recIdx)); else, defStr = char(obj.ConfigPort); end
-            s = strtrim(input(sprintf('Vyber config port (cislo zo zoznamu, alebo nazov) [%s]: ', defStr), 's'));
+            s = strtrim(input(sprintf('Select config port (number from the list, or name) [%s]: ', defStr), 's'));
             if isempty(s)
                 port = defStr;
             else
@@ -126,12 +126,12 @@ classdef awr2944_dca < handle
                 if ~isnan(n) && n>=1 && n<=numel(avail), port = char(avail(n)); else, port = s; end
             end
             obj.ConfigPort = string(port);
-            fprintf('  -> pouzivam port: %s\n', port);
+            fprintf('  -> using port: %s\n', port);
         end
 
         function cfg = pickConfig(obj)
-        % Vyber .cfg profilu. Vypise *.cfg najdene v priecinku triedy a opyta sa.
-        % Enter = predvoleny; mozno zadat cislo zo zoznamu, nazov, plnu cestu, alebo 'b' = prehladat.
+        % Selects the .cfg profile. Lists the *.cfg files found in the class folder and asks.
+        % Enter = default; a list number, a file name, a full path, or 'b' = browse.
             here  = fileparts(mfilename('fullpath'));
             L     = dir(fullfile(here, '*.cfg'));
             names = string({L.name});
@@ -139,22 +139,22 @@ classdef awr2944_dca < handle
             [~, curN, curE] = fileparts(cur); curFile = [curN curE];
             defIdx = 0;
             for i = 1:numel(names), if strcmpi(names(i), curFile), defIdx = i; break; end, end
-            fprintf('\nDostupne .cfg profily (%s):\n', here);
+            fprintf('\nAvailable .cfg profiles (%s):\n', here);
             if isempty(names)
-                fprintf('  (ziadny .cfg v priecinku triedy)\n');
+                fprintf('  (no .cfg in the class folder)\n');
             else
                 for i = 1:numel(names)
-                    mark = ''; if i == defIdx, mark = '  <- predvoleny'; end
+                    mark = ''; if i == defIdx, mark = '  <- default'; end
                     fprintf('  [%d] %s%s\n', i, names(i), mark);
                 end
             end
             if defIdx > 0, defStr = char(names(defIdx));
             elseif ~isempty(cur), defStr = cur; else, defStr = 'DCA_RX1111_TX1110_TDM.cfg'; end
-            s = strtrim(input(sprintf('Vyber profil (cislo / nazov / cesta, b=prehladat) [%s]: ', defStr), 's'));
+            s = strtrim(input(sprintf('Select profile (number / name / path, b=browse) [%s]: ', defStr), 's'));
             if isempty(s)
                 if defIdx > 0, cfg = char(fullfile(here, names(defIdx))); else, cfg = char(obj.ConfigFile); end
             elseif strcmpi(s, 'b')
-                [fn, fp] = uigetfile({'*.cfg','mmWave .cfg profil'}, 'Vyber .cfg profil', here);
+                [fn, fp] = uigetfile({'*.cfg','mmWave .cfg profile'}, 'Select .cfg profile', here);
                 if isequal(fn, 0)
                     if defIdx > 0, cfg = char(fullfile(here, names(defIdx))); else, cfg = char(obj.ConfigFile); end
                 else
@@ -174,48 +174,48 @@ classdef awr2944_dca < handle
             end
             obj.ConfigFile = string(cfg);
             if exist(char(cfg), 'file') ~= 2
-                warning('awr2944_dca:cfg', 'Profil neexistuje: %s', cfg);
+                warning('awr2944_dca:cfg', 'Profile does not exist: %s', cfg);
             end
-            fprintf('  -> profil: %s\n', cfg);
+            fprintf('  -> profile: %s\n', cfg);
         end
 
         function setup(obj)
             if obj.isSetup, return; end
             fprintf('awr2944_dca: setup...\n');
             obj.pickConfig();
-            capCfg = obj.makeCaptureCfg();      % doplni lvdsStreamCfg a dorovna numFrames=0, ak treba
+            capCfg = obj.makeCaptureCfg();      % adds lvdsStreamCfg and replaces numFrames=0 if needed
             obj.parseCfgDims(capCfg);
             obj.openUart();
             [ok, c] = awr_sensor_config(obj.uart, capCfg);
-            if ~ok, error('awr2944_dca:cfg', 'SensorConfig zlyhal.'); end
+            if ~ok, error('awr2944_dca:cfg', 'SensorConfig failed.'); end
             obj.cfg = c;
             obj.dca = dca_connect();
-            if isempty(obj.dca), error('awr2944_dca:dca', 'dca_connect zlyhal (Ethernet/IP?).'); end
+            if isempty(obj.dca), error('awr2944_dca:dca', 'dca_connect failed (Ethernet/IP?).'); end
             obj.isSetup = true;
-            obj.nCaptures = 0;   % cerstva konfiguracia -> prvy start bude holy 'sensorStart'
+            obj.nCaptures = 0;   % fresh configuration -> first start is a bare 'sensorStart'
             fprintf('awr2944_dca: setup OK (FPGA v%s)\n', obj.dca.fpgaVersion);
         end
 
         function cube = capture(obj)
             if ~obj.isSetup, obj.setup(); end
-            % mmWave CLI: po sensorStop sa restart robi cez 'sensorStart 0'
-            % (bez rekonfiguracie); holy 'sensorStart' je len pre PRVY start
-            % po plnej konfiguracii - inak CLI prikaz odmietne a data nepridu.
+            % mmWave CLI: after sensorStop, a restart is done with 'sensorStart 0'
+            % (no reconfiguration); a bare 'sensorStart' is only for the FIRST start
+            % after a full configuration - otherwise the CLI rejects it and no data arrive.
             if obj.nCaptures == 0
                 obj.cfg.sensorStartCmd = 'sensorStart';
             else
                 obj.cfg.sensorStartCmd = 'sensorStart 0';
             end
             [ok, raw] = dca_capture(obj.uart, obj.dca, obj.cfg);
-            obj.nCaptures = obj.nCaptures + 1;   % sensorStart+sensorStop prebehli aj pri ok=false
-            if ~ok, warning('awr2944_dca:capture', 'Capture neuspesny / 0 dat.'); end
+            obj.nCaptures = obj.nCaptures + 1;   % sensorStart+sensorStop were issued even if ok=false
+            if ~ok, warning('awr2944_dca:capture', 'Capture failed / no data.'); end
             cube = obj.reshapeRaw(double(raw));
             if obj.RecordToFile
                 outDir = obj.makeOutDir();
                 bf = char(fullfile(outDir, obj.RecordFilePrefix + "_0.bin"));
                 obj.LastBinFile = string(obj.writeBin(raw, bf));
-                % uloz aj pouzity .cfg vedla zaznamu (aby ho nastroje ako micro_doppler
-                % nasli priamo pri .bin v Downloads)
+                % also store the .cfg used next to the recording, so the recording
+                % is self-contained (data + the configuration that produced them)
                 try
                     [~, cn, ce] = fileparts(char(obj.ConfigFile));
                     if ~isempty(cn), copyfile(char(obj.ConfigFile), fullfile(outDir, [cn ce])); end
@@ -224,7 +224,7 @@ classdef awr2944_dca < handle
             end
             try
                 [~, bn, ratio] = awr2944_dca.quickRangeFFT(cube(:,1,1,1));
-                fprintf('  [validacia] cube %s | range-FFT chirp0/RX0: peak bin %d, peak/median %.1f\n', ...
+                fprintf('  [check] cube %s | range FFT chirp0/RX0: peak bin %d, peak/median %.1f\n', ...
                         mat2str(size(cube)), bn, ratio);
             catch
             end
@@ -238,10 +238,10 @@ classdef awr2944_dca < handle
             liveCfg = obj.makeLiveCfg();
             obj.openUart();
             [ok, c] = awr_sensor_config(obj.uart, liveCfg);
-            if ~ok, error('awr2944_dca:cfg', 'SensorConfig (live) zlyhal.'); end
+            if ~ok, error('awr2944_dca:cfg', 'SensorConfig (live) failed.'); end
             obj.cfg = c;
             obj.dca = dca_connect();
-            if isempty(obj.dca), error('awr2944_dca:dca', 'dca_connect zlyhal.'); end
+            if isempty(obj.dca), error('awr2944_dca:dca', 'dca_connect failed.'); end
             obj.dcaCmd(5, []);            % START_RECORD (ARM)
             pause(1.0);
             flush(obj.dca.udpData);
@@ -249,11 +249,11 @@ classdef awr2944_dca < handle
             obj.sRawLeftover = uint8([]); obj.sPayloadAccum = uint8([]); obj.sLastSeq = -1;
             obj.perFrameBytes = obj.SamplesPerChirp * obj.NumRX * obj.ChirpsPerFrame * 2;
             obj.LiveActive = true; obj.isSetup = true;
-            fprintf('  live OK: %d B/ramec (%d vzoriek)\n', obj.perFrameBytes, obj.perFrameBytes/2);
+            fprintf('  live OK: %d B/frame (%d samples)\n', obj.perFrameBytes, obj.perFrameBytes/2);
         end
 
         function frame = readFrame(obj, timeoutS)
-            if ~obj.LiveActive, error('awr2944_dca:live', 'Najprv startLive().'); end
+            if ~obj.LiveActive, error('awr2944_dca:live', 'Call startLive() first.'); end
             if nargin < 2, timeoutS = 2.0; end
             PKT=1466; HDR=10; PAY=1456;
             t0 = tic;
@@ -275,7 +275,7 @@ classdef awr2944_dca < handle
                 else
                     pause(0.001);
                 end
-                if toc(t0) > timeoutS, error('awr2944_dca:live', 'readFrame timeout (ziadne data).'); end
+                if toc(t0) > timeoutS, error('awr2944_dca:live', 'readFrame timeout (no data).'); end
             end
             fb = obj.sPayloadAccum(1:obj.perFrameBytes);
             obj.sPayloadAccum = obj.sPayloadAccum(obj.perFrameBytes+1:end);
@@ -284,26 +284,27 @@ classdef awr2944_dca < handle
         end
 
         function frame = readFrameLatest(obj, timeoutS)
-        % Ako readFrame, ale pre LIVE zobrazenie: spravi JEDEN zatah - vycerpa to, co
-        % je prave v sockete - a vrati len NAJNOVSI uplny ramec (starsie zahodi). Tym
-        % sa display odpoji od capture rychlosti; nikdy nedobieha donekonecna (pri 20 fps
-        % stale nieco priteka, takze cakat na prazdny socket nemozno). Ak este nie je ani
-        % jeden cely ramec, kratko pocka (do timeoutu). readFrame zostava nedotknuty.
-            if ~obj.LiveActive, error('awr2944_dca:live', 'Najprv startLive().'); end
+        % Like readFrame, but for LIVE display: performs ONE pass - drains what is
+        % currently in the socket - and returns only the NEWEST complete frame (older
+        % ones are discarded). The display is thus decoupled from the capture rate and
+        % never falls behind (at 20 fps data keep arriving, so waiting for an empty
+        % socket is not possible). If not even one complete frame is available yet, it
+        % waits briefly (up to the timeout). readFrame is unaffected.
+            if ~obj.LiveActive, error('awr2944_dca:live', 'Call startLive() first.'); end
             if nargin < 2, timeoutS = 2.0; end
             PKT=1466; HDR=10; PAY=1456;
-            % --- rychle zahodenie stareho backlogu (BEZ parsovania) ---
-            % Ak je v sockete viac nez ~2 ramce dat, precitaj a ZAHOD prebytocne stare
-            % pakety. Citanie je rychle; pomale je az per-paket parsovanie (rast pola
-            % O(n^2)). Bez tohto readFrameLatest pri pomalom view (pc) parsoval cely
-            % nahromadeny backlog ~2 s/volanie a display 'tuhol'. Citame v celych
-            % paketoch (PKT), takze zarovnanie ostava zachovane.
+            % --- fast discard of the old backlog (WITHOUT parsing) ---
+            % If the socket holds more than ~2 frames of data, read and DISCARD the
+            % surplus old packets. Reading is fast; per-packet parsing is slow (array
+            % growth O(n^2)). Without this, a slow consumer would parse the whole
+            % accumulated backlog (~2 s per call) and the display would stall. Reading
+            % is done in whole packets (PKT), so the stream alignment is preserved.
             pktsPerFrame = ceil(obj.perFrameBytes / PAY);
             keepPkts     = 2 * pktsPerFrame;
             nPktAvail    = floor(obj.dca.udpData.NumBytesAvailable / PKT);
             if nPktAvail > keepPkts
                 dropBytes = (nPktAvail - keepPkts) * PKT;
-                read(obj.dca.udpData, dropBytes, 'uint8');     % precitaj a zahod (rychle)
+                read(obj.dca.udpData, dropBytes, 'uint8');     % read and discard (fast)
                 obj.sRawLeftover = uint8([]); obj.sPayloadAccum = uint8([]); obj.sLastSeq = -1;
             end
             t0 = tic;
@@ -323,15 +324,15 @@ classdef awr2944_dca < handle
                         obj.sRawLeftover = obj.sRawLeftover(PKT+1:end);
                     end
                 end
-                % uz mame aspon jeden cely ramec -> hned koniec (NEcakame na prazdny socket)
+                % at least one complete frame available -> stop now (do NOT wait for an empty socket)
                 if numel(obj.sPayloadAccum) >= obj.perFrameBytes, break; end
-                % este nemame cely ramec: kratko pockaj na dalsie data
+                % no complete frame yet: wait briefly for more data
                 if n == 0, pause(0.001); end
                 if toc(t0) > timeoutS
-                    error('awr2944_dca:live', 'readFrameLatest timeout (ziadne data).');
+                    error('awr2944_dca:live', 'readFrameLatest timeout (no data).');
                 end
             end
-            % zahod stare ramce, nechaj len NAJNOVSI uplny
+            % discard old frames, keep only the NEWEST complete one
             nFull = floor(numel(obj.sPayloadAccum) / obj.perFrameBytes);
             if nFull > 1
                 obj.sPayloadAccum = obj.sPayloadAccum((nFull-1)*obj.perFrameBytes + 1 : end);
@@ -355,18 +356,19 @@ classdef awr2944_dca < handle
             end
             v = int16(data(:));
             fid = fopen(binFile, 'wb');
-            if fid < 0, error('awr2944_dca:writeBin', 'Nedaju sa otvorit %s', binFile); end
+            if fid < 0, error('awr2944_dca:writeBin', 'Cannot open %s', binFile); end
             fwrite(fid, v, 'int16'); fclose(fid);
-            fprintf('  .bin zapisany: %s (%d vzoriek)\n', binFile, numel(v));
+            fprintf('  .bin written: %s (%d samples)\n', binFile, numel(v));
             if obj.WriteLogFile
                 try, obj.writeLogFile(binFile);
-                catch ME, warning('awr2944_dca:writeLogFile', 'LogFile sa nepodaril: %s', ME.message); end
+                catch ME, warning('awr2944_dca:writeLogFile', 'LogFile could not be written: %s', ME.message); end
             end
         end
 
         function logFile = writeLogFile(obj, binFile)
-        % Vygeneruj adc_data_LogFile.txt (format mmWS API logu) k danemu .bin,
-        % aby ho vedel precitat BIN2MAT_2944. Parametre z obj.ConfigFile.
+        % Generates adc_data_LogFile.txt (mmWave Studio API log format) for the given
+        % .bin, so tools reading mmWave Studio recordings can read it. Parameters are
+        % taken from obj.ConfigFile.
             if nargin < 2 || isempty(binFile)
                 binFile = char(obj.LastBinFile);
                 if isempty(binFile)
@@ -377,7 +379,7 @@ classdef awr2944_dca < handle
             if isempty(folder), folder = char(obj.RecordLocation); end
             logFile = fullfile(folder, 'adc_data_LogFile.txt');
 
-            % --- parsuj CLI .cfg ---
+            % --- parse the CLI .cfg ---
             lines = regexp(fileread(char(obj.ConfigFile)), '\r\n|\n|\r', 'split');
             rxEn=15; txEn=7; bits=2; fmt=0; prof=[]; frm=[]; chirps={};
             for i = 1:numel(lines)
@@ -393,7 +395,7 @@ classdef awr2944_dca < handle
                 end
             end
 
-            % --- mmWS konstanty (inverzia k bin2mat) ---
+            % --- mmWave Studio constants (inverse of the reader's conversion) ---
             startFreqGHz=77; idleUs=7; adcStartUs=7; rampEndUs=60; slopeMHzus=70;
             numAdc=obj.SamplesPerChirp; sampleKsps=10000;
             if numel(prof)>=11
@@ -409,13 +411,13 @@ classdef awr2944_dca < handle
             cs=0; ce=2; loops=16; frames=20;
             if numel(frm)>=4, cs=frm(1); ce=frm(2); loops=frm(3); frames=frm(4); end
 
-            % Capture sa zastavi na ~98 %, takze posledny ramec v .bin byva neuplny
-            % (napr. 31 z 32). bin2mat deli celkovy pocet chirpov POCTOM RAMCOV z logu;
-            % ak tam dame konfiguracnych 'frames' (32) a v .bin je len 31 celych ramcov,
-            % vyjde nedelitelny pocet chirpov na TX -> pri 4 TX to spadne. Preto do logu
-            % zapiseme SKUTOCNY pocet celych ramcov v .bin (tak, ako ho odvodi aj bin2mat).
+            % Capture stops at ~98 %, so the last frame in the .bin is usually incomplete
+            % (e.g. 31 of 32). A reader divides the total number of chirps by the NUMBER
+            % OF FRAMES from the log; with the configured 'frames' (32) and only 31 complete
+            % frames in the .bin, the chirps per TX would not be an integer. The log
+            % therefore holds the ACTUAL number of complete frames in the .bin.
             framesLog = frames;
-            spf = obj.SamplesPerChirp * obj.NumRX * obj.ChirpsPerFrame;   % vzoriek na cely ramec
+            spf = obj.SamplesPerChirp * obj.NumRX * obj.ChirpsPerFrame;   % samples per complete frame
             try
                 di = dir(binFile);
                 if ~isempty(di) && ~isempty(spf) && spf > 0
@@ -425,7 +427,7 @@ classdef awr2944_dca < handle
             catch
             end
 
-            % --- zostav riadky ---
+            % --- assemble the lines ---
             ts = awr2944_dca.tsString();
             L = {};
             L{end+1} = sprintf('%s: IsFPGA:,0,0,', ts);
@@ -454,30 +456,30 @@ classdef awr2944_dca < handle
             L{end+1} = sprintf('%s: API:SensorStart,0,', ts);
 
             fid = fopen(logFile, 'w');
-            if fid < 0, error('awr2944_dca:writeLogFile', 'Nedaju sa otvorit %s', logFile); end
+            if fid < 0, error('awr2944_dca:writeLogFile', 'Cannot open %s', logFile); end
             for i = 1:numel(L), fprintf(fid, '%s\n', L{i}); end
             fclose(fid);
-            fprintf('  LogFile zapisany: %s\n', logFile);
+            fprintf('  LogFile written: %s\n', logFile);
         end
 
         function cube = readBin(obj, binFile)
             if nargin < 2 || isempty(binFile), binFile = char(obj.LastBinFile); end
             if isempty(binFile) || exist(binFile,'file') ~= 2
-                error('awr2944_dca:readBin', '.bin neexistuje: %s', binFile);
+                error('awr2944_dca:readBin', '.bin does not exist: %s', binFile);
             end
             fid = fopen(binFile, 'rb'); d = fread(fid, inf, 'int16=>double'); fclose(fid);
-            % Autodetekcia 4 B kontajnera (mmWS cez 2-linkovy '1642' rezim karty):
-            % platne 16-bit slovo striedane nulovym (neobsadeny druhy tok). Ak su
-            % VSETKY parne (resp. neparne) slova nulove a druha polovica nie je,
-            % vyberie sa platna polovica - subor sa dalej cita ako nas 2 B format.
+            % Auto-detection of the 4 B container (mmWave Studio via the 2-lane '1642'
+            % mode of the card): each valid 16-bit word alternates with a zero word
+            % (unused second stream). If ALL even (or odd) words are zero and the other
+            % half is not, the valid half is kept and the file is read as the 2 B format.
             if mod(numel(d),2) == 0 && numel(d) >= 4
                 od = d(1:2:end); ev = d(2:2:end);
                 if ~any(ev) && any(od)
                     d = od;
-                    fprintf('  [readBin] 4 B kontajner (nulove parne slova) -> platna polovica, %d vzoriek.\n', numel(d));
+                    fprintf('  [readBin] 4 B container (zero even words) -> valid half, %d samples.\n', numel(d));
                 elseif ~any(od) && any(ev)
                     d = ev;
-                    fprintf('  [readBin] 4 B kontajner (nulove neparne slova) -> platna polovica, %d vzoriek.\n', numel(d));
+                    fprintf('  [readBin] 4 B container (zero odd words) -> valid half, %d samples.\n', numel(d));
                 end
             end
             cube = obj.reshapeRaw(d);
@@ -487,8 +489,8 @@ classdef awr2944_dca < handle
             if obj.LiveActive, try, obj.stopLive(); catch, end, end
             try
                 if ~isempty(obj.uart) && isvalid(obj.uart)
-                    % cleanup: sensorStop posli ticho (priamo, bez awr_log) - ak je
-                    % port uz zoschnuty/odpojeny, chybu nelogujeme, aby nestrasila.
+                    % cleanup: send sensorStop silently (directly, without awr_log) - if
+                    % the port is already stale/disconnected, the error is not logged.
                     try, writeline(obj.uart, 'sensorStop'); catch, end
                     delete(obj.uart);
                 end
@@ -508,7 +510,7 @@ classdef awr2944_dca < handle
 
     methods (Access = private)
         function outDir = makeOutDir(obj)
-        % Urci vystupny priecinok merania (Downloads + casova peciatka) a vytvori ho.
+        % Determines the output folder of a measurement (Downloads + timestamp) and creates it.
             base = char(obj.RecordLocation);
             if isempty(base), base = awr2944_dca.downloadsDir(); end
             if obj.RecordSubfolder
@@ -521,8 +523,8 @@ classdef awr2944_dca < handle
         end
 
         function descMap = portDescr(~)
-        % Vrati containers.Map 'COMx' -> popis portu. Len Windows (cez WMI/PowerShell);
-        % na Mac/Linux (alebo pri chybe) vrati prazdnu mapu -> fallback na holy zoznam.
+        % Returns a containers.Map 'COMx' -> port description. Windows only (via
+        % WMI/PowerShell); on macOS/Linux (or on error) an empty map -> bare port list.
             descMap = containers.Map('KeyType','char','ValueType','char');
             if ~ispc, return; end
             try
@@ -570,7 +572,7 @@ classdef awr2944_dca < handle
                     lines{i} = strjoin(tok, ' ');
                 end
             end
-            lines = obj.ensureLvds(lines);     % DV export nema lvdsStreamCfg -> doplnit
+            lines = obj.ensureLvds(lines);     % Demo Visualizer export lacks lvdsStreamCfg -> add it
             p = char(fullfile(tempdir, '_awr2944_live.cfg'));
             fid = fopen(p, 'w');
             for i = 1:numel(lines), fprintf(fid, '%s\n', lines{i}); end
@@ -578,10 +580,10 @@ classdef awr2944_dca < handle
         end
 
         function p = makeCaptureCfg(obj)
-        % Priprav .cfg pre capture(): doplni lvdsStreamCfg, ak chyba (napr. DV
-        % export bez LVDS streamingu), a ak ma frameCfg numFrames=0 (nekonecne),
-        % nahradi ho konecnym poctom (obj.CaptureFrames), aby capture() korektne
-        % skoncil (inak by zbieral az do 30 s timeoutu).
+        % Prepares the .cfg for capture(): adds lvdsStreamCfg if missing (e.g. a Demo
+        % Visualizer export without LVDS streaming), and if frameCfg has numFrames=0
+        % (infinite), replaces it with a finite count (obj.CaptureFrames), so that
+        % capture() ends properly (otherwise it would record until the 30 s timeout).
             lines = regexp(fileread(char(obj.ConfigFile)), '\r\n|\n|\r', 'split');
             for i = 1:numel(lines)
                 t = strtrim(lines{i});
@@ -590,12 +592,12 @@ classdef awr2944_dca < handle
                     if numel(tok) >= 5 && str2double(tok{5}) == 0
                         tok{5} = num2str(max(round(obj.CaptureFrames),1));
                         lines{i} = strjoin(tok, ' ');
-                        fprintf('  [cfg] numFrames=0 -> %s ramcov (CaptureFrames) pre capture.\n', tok{5});
+                        fprintf('  [cfg] numFrames=0 -> %s frames (CaptureFrames) for capture.\n', tok{5});
                     end
                 end
             end
             [lines, added] = obj.ensureLvds(lines);
-            if added, fprintf('  [cfg] lvdsStreamCfg chybal (DV export?) -> doplneny -1 0 1 0.\n'); end
+            if added, fprintf('  [cfg] lvdsStreamCfg missing (Demo Visualizer export?) -> added -1 0 1 0.\n'); end
             p = char(fullfile(tempdir, '_awr2944_capture.cfg'));
             fid = fopen(p, 'w');
             for i = 1:numel(lines), fprintf(fid, '%s\n', lines{i}); end
@@ -603,9 +605,9 @@ classdef awr2944_dca < handle
         end
 
         function [lines, added] = ensureLvds(~, lines)
-        % Zaradi 'lvdsStreamCfg -1 0 1 0', ak v profile chyba (napr. DV export,
-        % ktory LVDS nepouziva). Vlozi ho pred sensorStart (inak na koniec).
-        % 'added' = true, ak sa doplnil.
+        % Inserts 'lvdsStreamCfg -1 0 1 0' if missing from the profile (e.g. a Demo
+        % Visualizer export, which does not use LVDS). Placed before sensorStart
+        % (otherwise at the end). 'added' = true if it was inserted.
             added = false; hasLvds = false;
             for i = 1:numel(lines)
                 if startsWith(strtrim(lines{i}), 'lvdsStreamCfg'), hasLvds = true; break; end
@@ -623,16 +625,16 @@ classdef awr2944_dca < handle
 
         function cube = reshapeRaw(obj, d)
             if isempty(obj.SamplesPerChirp) || isempty(obj.NumRX) || isempty(obj.ChirpsPerFrame)
-                error('awr2944_dca:dims', 'Nezname rozmery (parseCfgDims).');
+                error('awr2944_dca:dims', 'Unknown dimensions (parseCfgDims).');
             end
             nS = obj.SamplesPerChirp; nR = obj.NumRX; nC = obj.ChirpsPerFrame;
             perFrame = nS*nR*nC;
             nF = floor(numel(d)/perFrame);
-            if nF < 1, error('awr2944_dca:dims', 'Prilis malo dat (%d vz, ramec=%d).', numel(d), perFrame); end
-            % Posledny neuplny ramec je normalny (~98 %). Upozorni len pri realnej strate
-            % (chyba viac nez jeden ramec).
+            if nF < 1, error('awr2944_dca:dims', 'Too little data (%d samples, frame=%d).', numel(d), perFrame); end
+            % An incomplete last frame is normal (~98 %). Warn only on an actual loss
+            % (more than one frame missing).
             if ~isempty(obj.NumFrames) && obj.NumFrames > 0 && nF < obj.NumFrames - 1
-                warning('awr2944_dca:tail', 'Zachytenych len %d z %d ramcov (strata dat).', nF, obj.NumFrames);
+                warning('awr2944_dca:tail', 'Only %d of %d frames captured (data loss).', nF, obj.NumFrames);
             end
             d = d(1:nF*perFrame);
             cube = reshape(d, [nS, nR, nC, nF]);
@@ -640,7 +642,7 @@ classdef awr2944_dca < handle
 
         function parseCfgDims(obj, fileOverride)
             if nargin >= 2 && ~isempty(fileOverride), f = char(fileOverride); else, f = char(obj.ConfigFile); end
-            if exist(f,'file') ~= 2, warning('awr2944_dca:cfg','ConfigFile neexistuje: %s', f); return; end
+            if exist(f,'file') ~= 2, warning('awr2944_dca:cfg','ConfigFile does not exist: %s', f); return; end
             lines = regexp(fileread(f), '\r\n|\n|\r', 'split');
             rxEn=15; txEn=7; nS=[]; bits=16; cs=0; ce=0; loops=1; frames=0;
             for i = 1:numel(lines)
@@ -664,7 +666,7 @@ classdef awr2944_dca < handle
 
     methods (Static, Access = private)
         function d = downloadsDir()
-        % Priecinok Downloads aktualneho pouzivatela (cross-platform), s poistkami.
+        % Downloads folder of the current user (cross-platform), with fallbacks.
             if ispc, home = getenv('USERPROFILE'); else, home = getenv('HOME'); end
             if isempty(home), home = pwd; end
             d = fullfile(home, 'Downloads');

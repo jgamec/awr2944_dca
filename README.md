@@ -10,7 +10,7 @@ the complete four-dimensional data cube
 
 | Item                                   | Description                                            |
 |----------------------------------------|--------------------------------------------------------|
-| `src/awr2944_dca.m`                        | The acquisition class (v1.7)                           |
+| `src/awr2944_dca.m`                        | The acquisition class (v1.8)                           |
 | `src/awr_*.m`, `src/dca_*.m` | Helper functions: sensor CLI over UART, DCA1000EVM control and UDP capture, logging |
 | `src/DCA_RX1111_TX1110_TDM.cfg`   | Class default profile (TDM, 3 TX, elevation TX1)       |
 | `src/cast4_mmws_match.cfg`        | Verification profile (single TX0)  |
