@@ -12,8 +12,8 @@ the complete four-dimensional data cube
 |----------------------------------------|--------------------------------------------------------|
 | `src/awr2944_dca.m`                        | The acquisition class (v1.7)                           |
 | `src/awr_*.m`, `src/dca_*.m` | Helper functions: sensor CLI over UART, DCA1000EVM control and UDP capture, logging |
-| `profiles/DCA_RX1111_TX1110_TDM.cfg`   | Class default profile (TDM, 3 TX, elevation TX1)       |
-| `profiles/cast4_mmws_match.cfg`        | Verification profile (single TX0)  |
+| `src/DCA_RX1111_TX1110_TDM.cfg`   | Class default profile (TDM, 3 TX, elevation TX1)       |
+| `src/cast4_mmws_match.cfg`        | Verification profile (single TX0)  |
 | `sample_data/capture_raw/`             | Sample recording: static corner-reflector scene        |
 | `sample_data/capture_raw_micro/`       | Sample recording: rotating wire whisk (micro-Doppler)  |
 | `reproduce_section5_figures.m`         | Reproduces the range-Doppler map and micro-Doppler spectrogram      |
