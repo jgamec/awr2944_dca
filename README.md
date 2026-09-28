@@ -11,6 +11,7 @@ the complete four-dimensional data cube
 | Item                                   | Description                                            |
 |----------------------------------------|--------------------------------------------------------|
 | `src/awr2944_dca.m`                        | The acquisition class (v1.7)                           |
+| `src/awr_*.m`, `src/dca_*.m` | Helper functions: sensor CLI over UART, DCA1000EVM control and UDP capture, logging |
 | `profiles/DCA_RX1111_TX1110_TDM.cfg`   | Class default profile (TDM, 3 TX, elevation TX1)       |
 | `profiles/cast4_mmws_match.cfg`        | Verification profile (single TX0)  |
 | `sample_data/capture_raw/`             | Sample recording: static corner-reflector scene        |
@@ -29,8 +30,7 @@ companion `adc_data_LogFile.txt`, and a copy of the configuration profile used:
 
 ## Requirements
 
-- MATLAB (developed and tested on R2024b/R2025a, Windows; the class relies
-  only on the standard serial-port and UDP interfaces)
+- MATLAB (developed and tested on R2024b/R2025a, Windows) with Instrument Control Toolbox (required for acquisition: UDP interface of the DCA1000EVM)
 - For live measurements: AWR2944EVM flashed with the TI mmw demo firmware
   (mmWave MCUPLUS SDK), DCA1000EVM, Ethernet connection
 - No hardware is needed to read the sample data or reproduce the figures
@@ -39,9 +39,9 @@ companion `adc_data_LogFile.txt`, and a copy of the configuration profile used:
 
 ```matlab
 addpath('src');
-src  = awr2944_dca('ConfigFile', 'profiles/cast4_mmws_match.cfg');
+src  = awr2944_dca('ConfigFile', 'sample_data/capture_raw/DCA_RX1111_TX1110_TDM.cfg');
 cube = src.readBin('sample_data/capture_raw/adc_data_Raw_0.bin');
-size(cube)          % [samples x RX x chirps x frames]
+size(cube)          % 560 x 4 x 48 x 19  [samples x RX x chirps x frames]
 ```
 
 Reproduce the range-Doppler map and micro-Doppler spectrogram from the sample recording:
