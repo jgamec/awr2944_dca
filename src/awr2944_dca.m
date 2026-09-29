@@ -1,6 +1,6 @@
 classdef awr2944_dca < handle
 % AWR2944_DCA  Raw ADC data acquisition from the TI AWR2944EVM + DCA1000EVM
-% in MATLAB, without mmWave Studio.  [v1.8]
+% in MATLAB, without mmWave Studio.  [v1.9]
 %
 % BATCH (record -> cube -> .bin + adc_data_LogFile.txt):
 %   src  = awr2944_dca;
