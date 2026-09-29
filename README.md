@@ -10,7 +10,7 @@ the complete four-dimensional data cube
 
 | Item                              | Description                                                                          |
 |-----------------------------------|--------------------------------------------------------------------------------------|
-| `src/awr2944_dca.m`               | The acquisition class (v1.8)                                                         |
+| `src/awr2944_dca.m`               | The acquisition class (v1.9)                                                         |
 | `src/awr_*.m`, `src/dca_*.m`      | Helper functions: sensor CLI over UART, DCA1000EVM control and UDP capture, logging  |
 | `src/CFG_EDITOR_2944.m`           | Visual editor of .cfg profiles with live computation of cube size and resolutions    |
 | `src/radar_cfg.m`                 | Profile reader (.cfg or LogFile) and derived quantities: axes, resolutions, limits   |
