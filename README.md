@@ -8,16 +8,19 @@ the complete four-dimensional data cube
 
 ## Contents
 
-| Item                                   | Description                                            |
-|----------------------------------------|--------------------------------------------------------|
-| `src/awr2944_dca.m`                        | The acquisition class (v1.8)                           |
-| `src/awr_*.m`, `src/dca_*.m` | Helper functions: sensor CLI over UART, DCA1000EVM control and UDP capture, logging |
-| `src/DCA_RX1111_TX1110_TDM.cfg`   | Class default profile (TDM, 3 TX, elevation TX1)       |
-| `src/cast4_mmws_match.cfg`        | Verification profile (single TX0)  |
-| `sample_data/capture_raw/`             | Sample recording: static corner-reflector scene        |
-| `sample_data/capture_raw_micro/`       | Sample recording: rotating wire whisk (micro-Doppler)  |
-| `reproduce_section5_figures.m`         | Reproduces the range-Doppler map and micro-Doppler spectrogram      |
-| `LICENSE.txt`                              | MIT                                                    |
+| Item                              | Description                                                                          |
+|-----------------------------------|--------------------------------------------------------------------------------------|
+| `src/awr2944_dca.m`               | The acquisition class (v1.8)                                                         |
+| `src/awr_*.m`, `src/dca_*.m`      | Helper functions: sensor CLI over UART, DCA1000EVM control and UDP capture, logging  |
+| `src/CFG_EDITOR_2944.m`           | Visual editor of .cfg profiles with live computation of cube size and resolutions    |
+| `src/radar_cfg.m`                 | Profile reader (.cfg or LogFile) and derived quantities: axes, resolutions, limits   |
+| `src/elev_calib_load.m`           | Optional override of elevation calibration constants (no effect unless provided)     |
+| `src/DCA_RX1111_TX1110_TDM.cfg`   | Class default profile (TDM, 3 TX, elevation TX1)                                     |
+| `src/cast4_mmws_match.cfg`        | Verification profile (single TX0)                                                    |
+| `sample_data/capture_raw/`        | Sample recording: static corner-reflector scene                                      |
+| `sample_data/capture_raw_micro/`  | Sample recording: rotating wire whisk (micro-Doppler)                                |
+| `reproduce_section5_figures.m`    | Reproduces the range-Doppler map and micro-Doppler spectrogram                       |
+| `LICENSE.txt`                     | MIT                                                                                  |
 
 Each sample-data folder holds the raw recording (`adc_data_Raw_0.bin`), its
 companion `adc_data_LogFile.txt`, and a copy of the configuration profile used:
@@ -30,10 +33,12 @@ companion `adc_data_LogFile.txt`, and a copy of the configuration profile used:
 
 ## Requirements
 
-- MATLAB (developed and tested on R2024b/R2025a, Windows) with Instrument Control Toolbox (required for acquisition: UDP interface of the DCA1000EVM)
+- MATLAB, tested on R2025a and R2026b (Windows), with Instrument Control Toolbox
+  (required for acquisition: UDP interface of the DCA1000EVM)
 - For live measurements: AWR2944EVM flashed with the TI mmw demo firmware
   (mmWave MCUPLUS SDK), DCA1000EVM, Ethernet connection
-- No hardware is needed to read the sample data or reproduce the figures
+- No hardware is needed to read the sample data, reproduce the figures, or use
+  the configuration tools
 
 ## Quick start — no hardware
 
@@ -67,6 +72,35 @@ for k = 1:100
 end                                  % readFrameLatest() = bounded latency
 src.stopLive(); src.release();
 ```
+
+## Configuration tools
+
+`CFG_EDITOR_2944` opens a visual editor of a measurement profile. It loads a
+base `.cfg` (for example an export from the TI mmWave Demo Visualizer), shows the
+data-cube dimensions, range resolution, maximum range and recording size while
+the parameters are changed, and on export adds the LVDS streaming line required
+by the DCA1000EVM. The saved profile is then selected in `awr2944_dca`.
+
+```matlab
+addpath('src');
+CFG_EDITOR_2944                          % default profile
+CFG_EDITOR_2944('my_profile.cfg')        % a specific profile
+```
+
+`radar_cfg` reads a `.cfg` profile, or the `adc_data_LogFile.txt` stored with a
+recording, and returns the derived quantities in one structure, so that all
+tools use the same formulas:
+
+```matlab
+addpath('src');
+P = radar_cfg('src/DCA_RX1111_TX1110_TDM.cfg');
+fprintf('%.2f cm  %.1f m  %.2f m/s\n', 100*P.rangeRes_m, P.Rmax_m, P.vMax_ms)
+% 4.36 cm  12.2 m  0.99 m/s   (range resolution, maximum range, maximum velocity)
+```
+
+`elev_calib_load` lets a user replace the elevation calibration constants with an
+own file `elev_calib_local.m` on the MATLAB path; without that file the built-in
+values are used unchanged.
 
 ## Citation
 
