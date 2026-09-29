@@ -1,4 +1,4 @@
-function dca = dca_connect()
+function dca = dca_connect(dcaIP, pcIP)
 % DCA_CONNECT  Connects to and configures the DCA1000EVM over UDP.
 %
 % Command frame: header 0x5A 0xA5, command code, length, payload, footer 0xAA 0xEE
@@ -6,13 +6,15 @@ function dca = dca_connect()
 %
 % Sequence (as in the TI DCA1000 CLI / mmWave Studio):
 %   0x09 SYSTEM_CONNECT -> 0x0E READ_FPGA_VERSION -> 0x03 CONFIG_FPGA -> 0x0B CONFIG_RECORD
-% Ports: config 4096 (send and receive), data 4098.  IP: FPGA .180, PC .30.
+% Ports: config 4096 (send and receive), data 4098.  IP: arguments dcaIP, pcIP (default FPGA 192.168.33.180, PC 192.168.33.30).
 %
 % Output: dca struct (.udpCfg .udpData .dcaIP .configPort .dataPort .fpgaVersion)
 %         or [] on failure.
 
     dca = [];
-    DCA_IP = '192.168.33.180'; PC_IP = '192.168.33.30';
+    if nargin < 1 || isempty(dcaIP), dcaIP = '192.168.33.180'; end
+    if nargin < 2 || isempty(pcIP),  pcIP  = '192.168.33.30';  end
+    DCA_IP = char(dcaIP); PC_IP = char(pcIP);
     CONFIG_PORT = 4096; DATA_PORT = 4098; TO = 2.0;
 
     %% config socket (send + receive on 4096)

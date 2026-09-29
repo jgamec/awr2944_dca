@@ -189,7 +189,7 @@ classdef awr2944_dca < handle
             [ok, c] = awr_sensor_config(obj.uart, capCfg);
             if ~ok, error('awr2944_dca:cfg', 'SensorConfig failed.'); end
             obj.cfg = c;
-            obj.dca = dca_connect();
+            obj.dca = dca_connect(obj.DcaIPAddress, obj.HostIPAddress);
             if isempty(obj.dca), error('awr2944_dca:dca', 'dca_connect failed (Ethernet/IP?).'); end
             obj.isSetup = true;
             obj.nCaptures = 0;   % fresh configuration -> first start is a bare 'sensorStart'
@@ -240,7 +240,7 @@ classdef awr2944_dca < handle
             [ok, c] = awr_sensor_config(obj.uart, liveCfg);
             if ~ok, error('awr2944_dca:cfg', 'SensorConfig (live) failed.'); end
             obj.cfg = c;
-            obj.dca = dca_connect();
+            obj.dca = dca_connect(obj.DcaIPAddress, obj.HostIPAddress);
             if isempty(obj.dca), error('awr2944_dca:dca', 'dca_connect failed.'); end
             obj.dcaCmd(5, []);            % START_RECORD (ARM)
             pause(1.0);
