@@ -19,7 +19,7 @@ the complete four-dimensional data cube
 | `src/cast4_mmws_match.cfg`        | Verification profile (single TX0)                                                    |
 | `sample_data/capture_raw/`        | Sample recording: static corner-reflector scene                                      |
 | `sample_data/capture_raw_micro/`  | Sample recording: rotating wire whisk (micro-Doppler)                                |
-| `reproduce_section5_figures.m`    | Reproduces the range-Doppler map and micro-Doppler spectrogram                       |
+| `reproduce_figures.m`            | Reproduces the range-Doppler map and micro-Doppler spectrogram                       |
 | `LICENSE.txt`                     | MIT                                                                                  |
 
 Each sample-data folder holds the raw recording (`adc_data_Raw_0.bin`), its
@@ -52,7 +52,7 @@ size(cube)          % 560 x 4 x 48 x 19  [samples x RX x chirps x frames]
 Reproduce the range-Doppler map and micro-Doppler spectrogram from the sample recording:
 
 ```matlab
-reproduce_section5_figures
+reproduce_figures
 ```
 
 ## Quick start — with hardware
