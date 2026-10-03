@@ -183,12 +183,16 @@ classdef awr2944_dca < handle
             if obj.isSetup, return; end
             fprintf('awr2944_dca: setup...\n');
             obj.pickConfig();
-            capCfg = obj.makeCaptureCfg();      % adds lvdsStreamCfg and replaces numFrames=0 if needed
+            capCfg = obj.makeCaptureCfg();      % adds lvdsStreamCfg, replaces numFrames=0, adds 1 extra frame
             obj.parseCfgDims(capCfg);
+            obj.NumFrames = obj.NumFrames - 1;  % the extra frame is not returned
             obj.openUart();
             [ok, c] = awr_sensor_config(obj.uart, capCfg);
             if ~ok, error('awr2944_dca:cfg', 'SensorConfig failed.'); end
             obj.cfg = c;
+            obj.cfg.numFrames = obj.cfg.numFrames - 1;   % capture waits for and returns N frames
+            fprintf('  [cfg] sensor runs %d frames, %d are returned (DCA1000 drops the last short packet).\n', ...
+                    obj.cfg.numFrames + 1, obj.cfg.numFrames);
             obj.dca = dca_connect(obj.DcaIPAddress, obj.HostIPAddress);
             if isempty(obj.dca), error('awr2944_dca:dca', 'dca_connect failed (Ethernet/IP?).'); end
             obj.isSetup = true;
@@ -594,6 +598,14 @@ classdef awr2944_dca < handle
                         lines{i} = strjoin(tok, ' ');
                         fprintf('  [cfg] numFrames=0 -> %s frames (CaptureFrames) for capture.\n', tok{5});
                     end
+                    % The DCA1000EVM sends only full 1456-byte packets and drops the
+                    % shorter last one, so the end of the last frame never arrives.
+                    % The sensor therefore runs one extra frame; setup() restores N
+                    % and dca_capture() trims the stream to exactly N frames.
+                    if numel(tok) >= 5 && str2double(tok{5}) > 0
+                        tok{5} = num2str(str2double(tok{5}) + 1);
+                        lines{i} = strjoin(tok, ' ');
+                    end
                 end
             end
             [lines, added] = obj.ensureLvds(lines);
@@ -631,9 +643,8 @@ classdef awr2944_dca < handle
             perFrame = nS*nR*nC;
             nF = floor(numel(d)/perFrame);
             if nF < 1, error('awr2944_dca:dims', 'Too little data (%d samples, frame=%d).', numel(d), perFrame); end
-            % An incomplete last frame is normal (~98 %). Warn only on an actual loss
-            % (more than one frame missing).
-            if ~isempty(obj.NumFrames) && obj.NumFrames > 0 && nF < obj.NumFrames - 1
+            % The sensor runs one extra frame, so all N frames are complete; warn on any loss.
+            if ~isempty(obj.NumFrames) && obj.NumFrames > 0 && nF < obj.NumFrames
                 warning('awr2944_dca:tail', 'Only %d of %d frames captured (data loss).', nF, obj.NumFrames);
             end
             d = d(1:nF*perFrame);

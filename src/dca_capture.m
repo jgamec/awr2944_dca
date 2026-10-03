@@ -42,12 +42,12 @@ function [ok, raw] = dca_capture(uart, dca, cfg, outputBin)
     awr_send_cmd(uart, startCmd);
 
     % receive
-    buf = uint8([]); pkts=0; lost=0; lastSeq=-1; t0=tic; lastRep=tic; firstData=-1;
+    buf = uint8([]); pkts=0; lost=0; lastSeq=-1; t0=tic; lastRep=tic; firstData=-1; lastData=tic;
     fprintf('\n');
     while true
         n = dca.udpData.NumBytesAvailable;
         if n > 0
-            if firstData < 0, firstData = toc(t0); end
+            if firstData < 0, firstData = toc(t0); end; lastData = tic;
             buf = [buf, uint8(read(dca.udpData, n, 'uint8'))]; %#ok<AGROW>
             while numel(buf) >= PKT_B
                 seq = double(buf(1)) + double(buf(2))*256 + double(buf(3))*65536 + double(buf(4))*16777216;
@@ -65,7 +65,8 @@ function [ok, raw] = dca_capture(uart, dca, cfg, outputBin)
         else
             pause(0.002);
         end
-        if cfg.numFrames > 0 && widx >= expBytes*0.98, break; end
+        if cfg.numFrames > 0 && widx + max(numel(buf) - HDR_B, 0) >= expBytes, break; end   % everything arrived, incl. a shorter last packet
+        if cfg.numFrames > 0 && widx >= expBytes*0.98 && toc(lastData) > 0.5, break; end   % rest is handled after STOP_RECORD
         if toc(t0) > MAX_WAIT_S, awr_log('WARN: timeout'); break; end
         if toc(lastRep) >= 0.5
             fprintf('\r  %.2f / %.2f MB  pkt=%d  lost=%d   ', widx/1e6, expBytes/1e6, pkts, lost);
@@ -78,8 +79,23 @@ function [ok, raw] = dca_capture(uart, dca, cfg, outputBin)
     awr_log('sensorStop + STOP_RECORD (0x06)...');
     awr_send_cmd(uart, 'sensorStop'); pause(0.3);
     dca_send(dca.udpCfg, dca.dcaIP, dca.configPort, 6, []);
+    % DCA1000 releases the shorter last packet only after STOP_RECORD -> drain briefly
+    tDrain = tic;
+    while cfg.numFrames > 0 && widx + max(numel(buf) - HDR_B, 0) < expBytes && toc(tDrain) < 0.5
+        n = dca.udpData.NumBytesAvailable;
+        if n > 0, buf = [buf, uint8(read(dca.udpData, n, 'uint8'))]; else, pause(0.01); end %#ok<AGROW>
+    end
+    % shorter last packet (total size is not a multiple of PAY_B)
+    if numel(buf) > HDR_B && widx < cap
+        nTail = min([numel(buf) - HDR_B, cap - widx, max(expBytes - widx, 0)]);
+        out(widx+1:widx+nTail) = buf(HDR_B+1:HDR_B+nTail); widx = widx + nTail; pkts = pkts + 1;
+    end
+    if cfg.numFrames > 0 && widx < expBytes
+        awr_log(sprintf('WARN: end of stream missing (%d B)', expBytes - widx));
+    end
 
     % result -> raw int16
+    if cfg.numFrames > 0, widx = min(widx, expBytes); end   % drop the start of the extra frame
     out = out(1:widx);
     raw = typecast(out, 'int16'); raw = raw(:);
     if firstData < 0, awr_log('  WARNING: NOTHING arrived on port 4098 (LVDS->DCA?).');
