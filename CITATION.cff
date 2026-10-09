@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "awr2944_dca: Raw ADC data acquisition from the TI AWR2944EVM radar sensor in MATLAB"
+version: "1.9"
+abstract: "MATLAB class that configures the TI AWR2944EVM radar sensor and the DCA1000EVM capture card and returns the complete four-dimensional raw ADC data cube with a single call. Supports batch and live acquisition, reads and writes recordings in the mmWave Studio format, and includes a profile editor."
+authors:
+  - family-names: "Gamec"
+    given-names: "Ján"
+    orcid: "https://orcid.org/0000-0003-0417-2099"
+    affiliation: "Technical University of Košice"
+  - family-names: "Gamcová"
+    given-names: "Mária"
+    orcid: "https://orcid.org/0000-0003-2562-5544"
+    affiliation: "Technical University of Košice"
+license: MIT
+repository-code: "https://github.com/jgamec/awr2944_dca"
+keywords:
+  - FMCW radar
+  - mmWave
+  - raw ADC data
+  - AWR2944
+  - DCA1000EVM
+  - MATLAB
