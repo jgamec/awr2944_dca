@@ -1,5 +1,7 @@
 # awr2944_dca — Raw Data Acquisition for the TI AWR2944EVM + DCA1000EVM in MATLAB
 
+[![DOI](https://zenodo.org/badge/1390584493.svg)](https://doi.org/10.5281/zenodo.23269260)
+
 The `awr2944_dca` class is a native MATLAB path to raw ADC data of the
 Texas Instruments AWR2944 radar module with the DCA1000EVM capture card.
 A single call configures both the sensor and the capture card and returns
