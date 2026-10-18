@@ -414,6 +414,11 @@ classdef awr2944_dca < handle
 
             cs=0; ce=2; loops=16; frames=20;
             if numel(frm)>=4, cs=frm(1); ce=frm(2); loops=frm(3); frames=frm(4); end
+            % frame period [ms] = 6th value of frameCfg; mmWave Studio writes it
+            % to the log in 5 ns LSB (e.g. 40 ms -> 8000000)
+            periodMs = 100;
+            if numel(frm)>=6 && isfinite(frm(6)) && frm(6)>0, periodMs = frm(6); end
+            periodConst = round(periodMs*1e6/5);
 
             % Capture stops at ~98 %, so the last frame in the .bin is usually incomplete
             % (e.g. 31 of 32). A reader divides the total number of chirps by the NUMBER
@@ -456,7 +461,7 @@ classdef awr2944_dca < handle
                     L{end+1} = sprintf('%s: API:ChirpConfig,%d,%d,0,0,0,0,0,%d,0,', ts, cstart, cend, txe); %#ok<AGROW>
                 end
             end
-            L{end+1} = sprintf('%s: API:FrameConfig,%d,%d,%d,%d,100000000,0,%d,0,', ts, cs, ce, framesLog, loops, numAdc);
+            L{end+1} = sprintf('%s: API:FrameConfig,%d,%d,%d,%d,%d,0,%d,0,', ts, cs, ce, framesLog, loops, periodConst, numAdc);
             L{end+1} = sprintf('%s: API:SensorStart,0,', ts);
 
             fid = fopen(logFile, 'w');

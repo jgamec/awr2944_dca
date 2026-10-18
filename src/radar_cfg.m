@@ -159,10 +159,21 @@ function P = local_fromCfg(P, lines)
     if ~isempty(txm), P.txPhys = round(log2(max(txm,1))); end   % mask -> physical TX index
 end
 
+function ms = local_periodMs(val, lines)
+% FrameConfig periodicity in the mmWave Studio log is in 5 ns LSB (8000000 = 40 ms).
+% Logs written by awr2944_dca up to v1.9 contain a fixed 100000000 meant as ns
+% (100 ms); they are recognised by the AWR2944 chip tag and read as 100 ms.
+    if val == 100000000 && any(contains(lines, 'select_chip_version,AWR2944'))
+        ms = 100;
+    else
+        ms = val * 5e-6;
+    end
+end
+
 function P = local_fromLog(P, lines)
 % adc_data_LogFile.txt (mmWave Studio API log) - constants converted back.
 % ProfileConfig: 0,startFreqC,idleC,adcStartC,rampEndC,0,0,slopeC,0,numAdc,sampleKsps,...
-% FrameConfig:   cs,ce,numFrames,numLoops,periodicity_ns,0,numAdc,0
+% FrameConfig:   cs,ce,numFrames,numLoops,periodicity (5 ns LSB),0,numAdc,0
 % ChannelConfig: txEn,rxEn,0   (NOTE: in the log, TX comes first!)
 % ChirpConfig:   cs,ce,0,0,0,0,0,txMask,0
     txm = [];
@@ -191,7 +202,7 @@ function P = local_fromLog(P, lines)
                 if numel(v) >= 4
                     P.chirpStart = v(1);  P.chirpEnd = v(2);  P.numFrames = v(3);  P.numLoops = v(4);
                 end
-                if numel(v) >= 5, P.framePeriod_ms = v(5)/1e6; end   % ns -> ms
+                if numel(v) >= 5, P.framePeriod_ms = local_periodMs(v(5), lines); end
             case 'API:ChirpConfig'
                 if numel(v) >= 8, txm(end+1) = v(8); end %#ok<AGROW>  TX mask
         end
