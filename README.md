@@ -35,8 +35,8 @@ companion `adc_data_LogFile.txt`, and a copy of the configuration profile used:
 
 ## Requirements
 
-- MATLAB, tested on R2025a and R2026b (Windows), with Instrument Control Toolbox
-  (required for acquisition: UDP interface of the DCA1000EVM)
+- MATLAB, tested on R2022a to R2026b (Windows and macOS), with Instrument Control
+  Toolbox (required for acquisition: UDP interface of the DCA1000EVM)
 - For live measurements: AWR2944EVM flashed with the TI mmw demo firmware
   (mmWave MCUPLUS SDK), DCA1000EVM, Ethernet connection
 - No hardware is needed to read the sample data, reproduce the figures, or use
@@ -61,7 +61,7 @@ reproduce_figures
 
 ```matlab
 addpath('src');
-src  = awr2944_dca;      % interactive profile and COM-port prompts
+src  = awr2944_dca;      % interactive profile and serial-port prompts
 cube = src.capture();    % one batch measurement; writes .bin + LogFile
 ```
 
@@ -74,6 +74,35 @@ for k = 1:100
 end                                  % readFrameLatest() = bounded latency
 src.stopLive(); src.release();
 ```
+
+## macOS notes
+
+- Set the USB Ethernet adapter connected to the DCA1000EVM manually to IPv4
+  address `192.168.33.30`, subnet mask `255.255.255.0`.
+- At the serial-port prompt, select the XDS110 configuration port
+  `/dev/cu.usbmodem…01`, not `/dev/tty.usbmodem…`.
+- Allow MATLAB in System Settings → Privacy & Security → Local Network.
+- Intel builds of MATLAB (for example R2022a) run on Apple silicon under
+  Rosetta 2. With R2022a on an M1 Mac, macOS blocked MATLAB's UDP traffic to the
+  DCA1000EVM although Local Network access was enabled: the commands were never
+  sent and no error was reported. Starting MATLAB from Terminal works around this:
+
+  ```bash
+  /Applications/MATLAB_R2022a.app/bin/matlab &
+  ```
+
+  Keep the Terminal window open while MATLAB runs. A native Apple silicon
+  release (tested: R2024b) needs no workaround.
+
+## Troubleshooting
+
+- **The DCA1000EVM connects but no frames arrive** (`SYSTEM_CONNECT` and
+  `CONFIG_RECORD` report OK, then `readFrameLatest timeout`): after many
+  interrupted runs the sensor may stop responding to `sensorStart`. Power-cycle
+  both the AWR2944EVM and the DCA1000EVM.
+- **Own test tools:** the DCA1000EVM answers configuration commands from source
+  port 1024, not 4096. A UDP socket connected to port 4096 discards the replies;
+  receive from any port instead.
 
 ## Configuration tools
 
